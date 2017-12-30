@@ -4,9 +4,9 @@ module Construction.Internal.Types
   , Equation
   ) where
 
-import Data.Text (Text) -- we want to import only Text from Data.Text.
-import Data.Map  (Map (..))
-import Data.Set  (Set (..))
+import           Data.Map  (Map (..), empty, union)
+import           Data.Set  (Set (..))
+import           Data.Text (Text)
 
 
 type Name = Text -- just alias, no more
@@ -20,7 +20,12 @@ data Term = Var { var :: Name }                     -- Variables: a, b, ...
 
 data Type = TVar { tvar :: Name }                   -- Type variables: a, b, ...
           | TArr { from :: Type, to :: Type }       -- Arrow types: a -> b
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+
+instance Show Type where
+  show (TVar n)           = show n
+  show (TArr (TVar n) to) = show n ++ " -> " ++ show to
+  show (TArr from to)     = "(" ++ show from ++ ") -> " ++ show to
 
 newtype Context = Context { getCtx :: Map Name Type } -- Types of variables
   deriving (Show)
@@ -31,9 +36,9 @@ newtype Substitution = Substitution { getSubs :: Map Name Type } -- Substitute t
 type Equation = (Type, Type) -- Equation on types
 
 instance Monoid Context where
-  mempty = undefined
-  Context a `mappend` Context b = undefined
+  mempty = Context empty
+  Context a `mappend` Context b = Context $ a `union` b
 
 instance Monoid Substitution where
-  mempty = undefined
-  Substitution a `mappend` Substitution b = undefined
+  mempty = Substitution empty
+  Substitution a `mappend` Substitution b = Substitution $ a `union` b
