@@ -4,14 +4,21 @@
 module Construction.Internal.TypeFunctions where
 
 import           Construction.Internal.Functions hiding (Context, substitute)
+import           Construction.Internal.Parser    (greedy, termP, typeP)
 import           Construction.Internal.Types
 import           Control.Arrow                   ((***))
-import           Data.Map                        (Map (..), fromList, member, union)
-import qualified Data.Map                        as M ((!), singleton, toList, insert)
+import           Data.Either                     (isLeft, isRight)
+import           Data.Map                        (Map (..), fromList, member,
+                                                  union)
+import qualified Data.Map                        as M (insert, singleton,
+                                                       toList, (!))
 import           Data.Set                        (Set (..), delete, elemAt,
-                                                  insert, singleton, toList, unions)
-import qualified Data.Set as S
+                                                  insert, singleton, toList,
+                                                  unions)
+import qualified Data.Set                        as S
+import           Data.String                     (IsString (..))
 import           Data.Text                       (pack)
+import           Text.Parsec                     (parse)
 
 -- Split a set of elements to the first element and rest set
 split :: Ord a => Set a -> (a, Set a)
@@ -22,6 +29,21 @@ split set = let x = elemAt 0 set
 (!) :: Context -> Name -> Maybe Type
 ctx ! x | member x (getCtx ctx) = Just $ getCtx ctx M.! x
         | otherwise             = Nothing
+
+instance IsString Term where
+  fromString s = case result of
+                    Left msg  -> error $ show msg
+                    Right res -> res
+    where
+      result = parse (greedy termP) "Term parser" . pack $ s
+
+
+instance IsString Type where
+  fromString s = case result of
+                    Left msg  -> error $ show msg
+                    Right res -> res
+    where
+      result = parse (greedy typeP) "Type parser" . pack $ s
 
 -- Something we can perform substitution with
 class Substitutable a where
@@ -55,7 +77,7 @@ contextFromTerm term = Context $ fromList $ zip (toList $ free term) vars
 
 -- Find a substitution that can solve the set of equations
 u :: [Equation] -> Maybe Substitution
-u [] = pure mempty
+u []       = pure mempty
 u (x:rest) = singletonU x rest
 
 singletonU :: Equation -> [Equation] -> Maybe Substitution
@@ -74,7 +96,7 @@ isVar (TVar _) = True
 isVar _        = False
 
 contains :: Type -> Name -> Bool
-contains (TVar n) ref = n == ref
+contains (TVar n) ref       = n == ref
 contains (TArr sig tau) ref = (sig `contains` ref) || (tau `contains` ref)
 
 getCtxNames :: Map Name Type -> Set Name
@@ -84,22 +106,31 @@ updateContext :: Context -> Name -> Type -> Context
 updateContext (Context ctx) name tp = Context $ M.insert name tp ctx
 
 nameSet :: Type -> Set Name
-nameSet (TVar n) = singleton n
+nameSet (TVar n)     = singleton n
 nameSet (TArr t1 t2) = nameSet t1 `S.union` nameSet t2
 
 -- Generate equations set from some term
 -- NB: you can use @fresh@ function to generate type names
 e :: Context -> Term -> Type -> Maybe [Equation]
-e ctx@(Context ctMap) term tpe = case term of
-                   Var{..} -> pure . (,) tpe <$> ctx ! var
-                   App{..} -> let alpha = fresh (nameSet tpe `S.union` getCtxNames ctMap)
-                              in e ctx algo (TArr (TVar alpha) tpe) `mappend` e ctx arg (TVar alpha)
+e ctx term tpe = snd $ eNamed S.empty ctx term tpe
+
+eNamed :: Set Name -> Context -> Term -> Type -> (Set Name, Maybe [Equation])
+eNamed used ctx@(Context ctMap) term tpe = case term of
+                   Var{..} -> (var `S.insert` used, pure . (,) tpe <$> ctx ! var)
+                   App{..} -> let used' = used `S.union` nameSet tpe `S.union` getCtxNames ctMap
+                                  alpha = fresh used'
+                                  (used'', eq1) = eNamed (alpha `S.insert` used') ctx algo (TArr (TVar alpha) tpe)
+                                  (usedFinal, eq2) = eNamed used'' ctx arg (TVar alpha)
+                              in (usedFinal, eq1 `mappend` eq2)
                    Lam{..} -> let tpeNames   = nameSet tpe
-                                  alpha      = fresh (tpeNames `S.union` getCtxNames ctMap)
+                                  used'      = used `S.union` tpeNames `S.union` getCtxNames ctMap
+                                  alpha      = fresh used'
                                   updatedCtx = updateContext ctx variable (TVar alpha)
-                                  beta       = fresh (tpeNames `S.union` getCtxNames (getCtx updatedCtx))
+                                  used''     = used' `S.union` getCtxNames (getCtx updatedCtx)
+                                  beta       = fresh used''
                                   arrAB      = TArr (TVar alpha) (TVar beta)
-                              in e updatedCtx body arrAB `mappend` pure [(tpe, arrAB)]
+                                  (usedFinal, eq) = eNamed (beta `S.insert` used'') updatedCtx body (TVar beta)
+                              in (usedFinal, eq `mappend` pure [(tpe, arrAB)])
 
 -- Find a principal pair of some term if exists
 pp :: Term -> Maybe (Context, Type)

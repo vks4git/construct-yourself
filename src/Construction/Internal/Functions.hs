@@ -24,7 +24,7 @@ type Context = Set Name
 -- | @fresh@ generates new variable different from every variables in set.
 fresh :: Set Name -> Name
 fresh conflicts = head . dropWhile (`member` conflicts) $ nameGen -- This is ugly name generator. Make it better.
-  where nameGen = [pack $ 'x' : show ind | ind <- [0..] :: [Int]]
+  where nameGen = [pack $ 't' : show ind | ind <- [0..] :: [Int]]
 
 -- | @free@ finds all free (Amazing!) variables from given term.
 free :: Term -> Set Name
